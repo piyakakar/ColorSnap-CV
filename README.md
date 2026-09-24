@@ -2,7 +2,7 @@
 
 **ColorSnap** is an interactive, browser-based Computer Vision application that uses a webcam to detect and classify the dominant color of an object being held in the user's hand in real time.
 
-Built with a **React + TypeScript** frontend, **Computer Vision (HSV color segmentation + Hand/Object tracking)**, a **Node.js/Express** backend, and **MongoDB** for logging detection history.
+Built with a **React + TypeScript** frontend, **Computer Vision (HSV color segmentation + Hand/Object tracking)**, a **Node.js/Express** backend, and **MongoDB Atlas** for logging detection history.
 
 ---
 
@@ -14,7 +14,7 @@ When a user holds an object (e.g., a black TV remote, red bottle, blue pen, yell
 3. Skin tones and neutral backgrounds are filtered out.
 4. Pixels are converted from RGB to the **HSV color space** and classified into calibrated color bins.
 5. A temporal stability smoothing filter prevents rapid flickering and computes a confidence score.
-6. Meaningful detection events are automatically synchronized with the Express backend and persisted in MongoDB.
+6. Meaningful detection events are automatically synchronized with the Express backend and persisted in MongoDB Atlas.
 
 ---
 
@@ -26,7 +26,7 @@ When a user holds an object (e.g., a black TV remote, red bottle, blue pen, yell
 * 🔬 **HSV Color Space Analysis**: Robust Hue, Saturation, and Value color segmentation rather than hardcoded RGB equality.
 * 🛡️ **Skin Tone & Background Filtering**: Automatically discounts human skin pigments from object color calculation.
 * 📊 **Temporal Stability & Confidence Indicator**: Smooths frame-to-frame jitter and provides real-time confidence metrics.
-* 🗄️ **MongoDB Detection History**: Automatically records stable detection events with timestamps and confidence scores.
+* 🗄️ **MongoDB Atlas Cloud Database**: Real-time cloud persistence for detection events with timestamps and confidence scores.
 * ⚡ **Glassmorphism Dark Mode UI**: Modern, responsive interface with real-time color highlights, FPS counter, and status chips.
 
 ---
@@ -75,7 +75,7 @@ The system classifies objects into **10 calibrated colors**:
     ✨ Display Color + Confidence (e.g. "BLACK 94%")
                │
                ▼
-    💾 Persist to MongoDB via Express REST API
+    💾 Persist to MongoDB Atlas via Express REST API
 ```
 
 ---
@@ -110,7 +110,8 @@ ColorSnap/
 │   │   └── Detection.js             # Mongoose Detection schema
 │   ├── routes/
 │   │   └── detectionRoutes.js       # REST API endpoints
-│   ├── server.js                    # Express server entrypoint
+│   ├── .env.example                 # Environment variables template
+│   ├── server.js                    # Express server with MongoDB Atlas integration
 │   └── package.json
 │
 ├── README.md
@@ -120,23 +121,32 @@ ColorSnap/
 
 ---
 
+## ⚙️ Environment Configuration
+
+Create a `.env` file in the `backend/` directory:
+
+```env
+PORT=5000
+MONGODB_URI=mongodb+srv://<db_username>:<db_password>@colorsnap.xhvwgzv.mongodb.net/colorsnap?retryWrites=true&w=majority&appName=ColorSnap
+```
+
+---
+
 ## 🚀 Getting Started & Installation
 
 ### Prerequisites
 
 * [Node.js](https://nodejs.org/) (v18 or newer)
-* [MongoDB](https://www.mongodb.com/) (Optional: if MongoDB is not running, the backend seamlessly falls back to in-memory persistence)
+* [MongoDB Atlas](https://www.mongodb.com/atlas) account (or local MongoDB)
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/<your-username>/ColorSnap.git
-cd ColorSnap
+git clone https://github.com/piyakakar/ColorSnap-CV.git
+cd ColorSnap-CV
 ```
 
 ### 2. Install Dependencies
-
-Install dependencies for both backend and frontend:
 
 ```bash
 # Install backend dependencies
@@ -156,7 +166,7 @@ From the `backend` directory:
 npm run dev
 ```
 
-The Express API will be available at: `http://localhost:5000`
+The Express API will be running on: `http://localhost:5000`
 
 ### 4. Run the Frontend Development Server
 
@@ -166,7 +176,7 @@ From the `frontend` directory:
 npm run dev
 ```
 
-The React frontend will be available at: `http://localhost:3000`
+The React application will be running on: `http://localhost:3000`
 
 ---
 
@@ -174,7 +184,7 @@ The React frontend will be available at: `http://localhost:3000`
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/health` | Service health & MongoDB connection status |
+| `GET` | `/api/health` | Service health & MongoDB Atlas connection status |
 | `GET` | `/api/detections` | Get the 30 most recent detection records |
 | `POST` | `/api/detections` | Save a new detection event `{ color, confidence, hexCode }` |
 | `DELETE` | `/api/detections` | Clear all recorded detections |
@@ -195,7 +205,7 @@ The React frontend will be available at: `http://localhost:3000`
    * 🌸 **Pink eraser / case** → `PINK`
    * 📄 **White paper / card** → `WHITE`
    * 🔷 **Cyan bottle cap / toy** → `CYAN`
-3. Observe the live bounding box, confidence meter, highlighted palette swatch, and automatic MongoDB history logging.
+3. Observe the live bounding box, confidence meter, highlighted palette swatch, and automatic MongoDB Atlas cloud history logging.
 
 ---
 

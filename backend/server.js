@@ -1,13 +1,25 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
+const path = require('path');
+const dns = require('dns');
+
+// Configure reliable DNS servers for MongoDB Atlas SRV lookup on Windows
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1']);
+} catch (e) {
+  // Ignore if not permitted
+}
+
+// Load environment variables from backend/.env or root .env
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config();
 
 const detectionRoutes = require('./routes/detectionRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/colorsnap';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://piyakakar0901_db_user:qy7HLOMxy6IWf7HK@colorsnap.xhvwgzv.mongodb.net/colorsnap?retryWrites=true&w=majority&appName=ColorSnap';
 
 // Middlewares
 app.use(cors());
@@ -21,6 +33,7 @@ app.get('/', (req, res) => {
   res.json({
     project: 'ColorSnap - Real-Time Color Detector Backend',
     version: '1.0.0',
+    dbConnected: mongoose.connection.readyState === 1,
     endpoints: {
       health: 'GET /api/health',
       getDetections: 'GET /api/detections',
@@ -33,10 +46,10 @@ app.get('/', (req, res) => {
 // Database connection with non-blocking graceful handling
 mongoose
   .connect(MONGODB_URI, {
-    serverSelectionTimeoutMS: 3000,
+    serverSelectionTimeoutMS: 8000,
   })
   .then(() => {
-    console.log(`✅ MongoDB connected successfully to ${MONGODB_URI}`);
+    console.log('✅ MongoDB Atlas connected successfully (Database: colorsnap)');
   })
   .catch((err) => {
     console.warn(`⚠️ MongoDB connection warning: ${err.message}`);
