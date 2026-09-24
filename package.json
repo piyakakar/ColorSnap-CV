@@ -1,0 +1,23 @@
+{
+  "name": "colorsnap-real-time-color-detector",
+  "version": "1.0.0",
+  "description": "ColorSnap - Real-Time Handheld Object Color Detector using Computer Vision, React, TypeScript, Node.js, Express, and MongoDB",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev": "npm run dev:backend"
+  },
+  "keywords": [
+    "computer-vision",
+    "color-detection",
+    "react",
+    "typescript",
+    "express",
+    "mongodb",
+    "hsv",
+    "hand-tracking"
+  ],
+  "author": "Antigravity",
+  "license": "MIT"
+}
