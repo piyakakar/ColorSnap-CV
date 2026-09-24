@@ -201,24 +201,11 @@ body {
   box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.8);
 }
 
-.video-element {
+.canvas-view {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1); /* Mirror camera for natural interaction */
-}
-
-.video-element.no-mirror {
-  transform: scaleX(1);
-}
-
-.canvas-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
+  display: block;
 }
 
 .camera-placeholder {

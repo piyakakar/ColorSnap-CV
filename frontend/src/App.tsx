@@ -20,6 +20,7 @@ import { AlertCircle } from 'lucide-react';
 export const App: React.FC = () => {
   // State
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [isMirrored, setIsMirrored] = useState<boolean>(true);
   const [detectedColor, setDetectedColor] = useState<SupportedColorName | null>(null);
   const [confidence, setConfidence] = useState<number>(0);
   const [hexCode, setHexCode] = useState<string>('#6366f1');
@@ -44,8 +45,10 @@ export const App: React.FC = () => {
   const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameIdRef = useRef<number | null>(null);
-  const stabilityManagerRef = useRef<StabilityManager>(new StabilityManager(10));
+  const stabilityManagerRef = useRef<StabilityManager>(new StabilityManager(7));
   const handTrackerRef = useRef<{ processFrame: (video: HTMLVideoElement) => Promise<void>; close: () => void } | null>(null);
+  const isTrackingRef = useRef<boolean>(false);
+  const lastTrackingTimeRef = useRef<number>(0);
   
   const lastSavedColorRef = useRef<string | null>(null);
   const lastSavedTimeRef = useRef<number>(0);
@@ -64,14 +67,12 @@ export const App: React.FC = () => {
   // Fetch backend status & detection history
   const fetchBackendData = useCallback(async () => {
     try {
-      // Health check
       const healthRes = await fetch('/api/health');
       if (healthRes.ok) {
         const healthData = await healthRes.json();
         setDbConnected(Boolean(healthData.dbConnected));
       }
 
-      // Detections history
       setIsLoadingHistory(true);
       const detectionsRes = await fetch('/api/detections');
       if (detectionsRes.ok) {
@@ -89,7 +90,6 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     fetchBackendData();
-    // Poll history periodically
     const interval = setInterval(fetchBackendData, 10000);
     return () => clearInterval(interval);
   }, [fetchBackendData]);
@@ -97,7 +97,6 @@ export const App: React.FC = () => {
   // Save detection to backend
   const saveDetectionToBackend = useCallback(async (color: SupportedColorName, conf: number, hex: string) => {
     const now = Date.now();
-    // Only save if color changed OR 4 seconds passed since last save of same color
     if (lastSavedColorRef.current === color && now - lastSavedTimeRef.current < 4000) {
       return;
     }
@@ -142,26 +141,22 @@ export const App: React.FC = () => {
 
   // Computer Vision Processing Pipeline
   const processFrame = useCallback(() => {
-    if (!videoRef.current || videoRef.current.readyState < 2) {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas || video.readyState < 2) {
       animFrameIdRef.current = requestAnimationFrame(processFrame);
       return;
     }
 
-    const video = videoRef.current;
-    if (!offscreenCanvasRef.current) {
-      offscreenCanvasRef.current = document.createElement('canvas');
-    }
-    const offscreen = offscreenCanvasRef.current;
-    if (offscreen.width !== video.videoWidth || offscreen.height !== video.videoHeight) {
-      offscreen.width = video.videoWidth || 640;
-      offscreen.height = video.videoHeight || 480;
-    }
-
-    const ctx = offscreen.getContext('2d', { willReadFrequently: true });
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) {
       animFrameIdRef.current = requestAnimationFrame(processFrame);
       return;
     }
+
+    const w = canvas.width;
+    const h = canvas.height;
 
     // Measure FPS
     frameCountRef.current++;
@@ -172,13 +167,35 @@ export const App: React.FC = () => {
       lastFpsTimeRef.current = now;
     }
 
-    // Trigger MediaPipe tracking frame if ready
-    if (handTrackerRef.current) {
-      handTrackerRef.current.processFrame(video).catch(() => {});
+    // Run Hand Tracking throttled asynchronously (every 180ms) to maintain 60 FPS smoothly
+    if (handTrackerRef.current && !isTrackingRef.current && now - lastTrackingTimeRef.current > 180) {
+      isTrackingRef.current = true;
+      lastTrackingTimeRef.current = now;
+      handTrackerRef.current.processFrame(video).finally(() => {
+        isTrackingRef.current = false;
+      });
     }
 
-    // Draw video frame to offscreen canvas
-    ctx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+    // 1. Draw live webcam frame directly onto the visible canvas
+    ctx.save();
+    if (isMirrored) {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(video, 0, 0, w, h);
+    ctx.restore();
+
+    // 2. Prepare offscreen unmirrored canvas for reliable pixel processing
+    if (!offscreenCanvasRef.current) {
+      offscreenCanvasRef.current = document.createElement('canvas');
+      offscreenCanvasRef.current.width = w;
+      offscreenCanvasRef.current.height = h;
+    }
+    const offscreen = offscreenCanvasRef.current;
+    const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
+    if (offCtx) {
+      offCtx.drawImage(video, 0, 0, w, h);
+    }
 
     const handState = latestHandResultRef.current;
     const hasHand = handState.hasHand;
@@ -189,14 +206,14 @@ export const App: React.FC = () => {
     const roiBox = (hasHand && handState.objectBox) ? handState.objectBox : getCentralTargetBox();
     setObjectBox(roiBox);
 
-    const roiPixelX = Math.floor(roiBox.x * offscreen.width);
-    const roiPixelY = Math.floor(roiBox.y * offscreen.height);
-    const roiPixelW = Math.floor(roiBox.width * offscreen.width);
-    const roiPixelH = Math.floor(roiBox.height * offscreen.height);
+    const roiPixelX = Math.floor(roiBox.x * w);
+    const roiPixelY = Math.floor(roiBox.y * h);
+    const roiPixelW = Math.floor(roiBox.width * w);
+    const roiPixelH = Math.floor(roiBox.height * h);
 
-    if (roiPixelW > 10 && roiPixelH > 10) {
+    if (offCtx && roiPixelW > 10 && roiPixelH > 10) {
       try {
-        const frameData = ctx.getImageData(roiPixelX, roiPixelY, roiPixelW, roiPixelH);
+        const frameData = offCtx.getImageData(roiPixelX, roiPixelY, roiPixelW, roiPixelH);
         const data = frameData.data;
 
         const colorHistogram: Record<SupportedColorName, number> = {
@@ -232,8 +249,7 @@ export const App: React.FC = () => {
         const centerY = roiPixelH / 2;
         const maxDist = Math.sqrt(centerX * centerX + centerY * centerY);
 
-        // Sample pixels with step for fast CV performance
-        const step = 2; // sample every 2nd pixel (4x speedup)
+        const step = 2; // fast 2x pixel sampling
         for (let y = 0; y < roiPixelH; y += step) {
           for (let x = 0; x < roiPixelW; x += step) {
             const index = (y * roiPixelW + x) * 4;
@@ -252,7 +268,6 @@ export const App: React.FC = () => {
 
             const classified = classifyHsvPixel(pixelHsv, pixelRgb);
             if (classified) {
-              // Center-weighted voting (pixels closer to center of ROI have 1.5x - 2x vote)
               const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
               const weight = 1 + (1 - dist / maxDist);
 
@@ -280,7 +295,7 @@ export const App: React.FC = () => {
         const hasObject = validObjectPixelCount >= 15 && dominanceRatio >= 0.25;
         setIsObjectDetected(hasObject);
 
-        // Run through Temporal Stability Filter to eliminate flickering
+        // Stability Filter
         const stabilityResult = stabilityManagerRef.current.addFrame(hasObject ? candidateColor : null);
 
         if (stabilityResult.isStable && stabilityResult.stableColor) {
@@ -290,9 +305,8 @@ export const App: React.FC = () => {
           const avgSample = calculateAverageColor(colorPixels);
           const sampleHsv = rgbToHsv(avgSample.rgb.r, avgSample.rgb.g, avgSample.rgb.b);
 
-          // Calculate confidence (capped at 96% to avoid unrealistic 100%)
           const rawConf = Math.round((dominanceRatio * 0.45 + stabilityResult.stabilityScore * 0.55) * 100);
-          const finalConfidence = Math.min(96, Math.max(62, rawConf));
+          const finalConfidence = Math.min(96, Math.max(68, rawConf));
 
           setDetectedColor(matchedColor);
           setConfidence(finalConfidence);
@@ -301,7 +315,6 @@ export const App: React.FC = () => {
           setHsv(sampleHsv);
           setStatusMessage(`Object detected: ${matchedColor}`);
 
-          // Trigger backend save on stable detection event
           saveDetectionToBackend(matchedColor, finalConfidence, matchedDef ? matchedDef.hex : avgSample.hex);
         } else if (!hasObject) {
           if (isCameraActive) {
@@ -313,8 +326,46 @@ export const App: React.FC = () => {
       }
     }
 
+    // 3. Draw overlays onto the visible canvas
+    // Hand Landmarks
+    if (handState.landmarks && handState.landmarks.length > 0) {
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.85)';
+      for (const pt of handState.landmarks) {
+        const lx = (isMirrored ? (1 - pt.x) : pt.x) * w;
+        const ly = pt.y * h;
+        ctx.beginPath();
+        ctx.arc(lx, ly, 4, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+
+    // Held Object ROI Bounding Box
+    if (roiBox) {
+      const boxX = (isMirrored ? (1 - roiBox.x - roiBox.width) : roiBox.x) * w;
+      const boxY = roiBox.y * h;
+      const boxW = roiBox.width * w;
+      const boxH = roiBox.height * h;
+
+      ctx.shadowColor = hexCode || '#6366f1';
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = hexCode || '#6366f1';
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(10, 13, 20, 0.85)';
+      ctx.fillRect(boxX, boxY - 24, Math.max(120, boxW * 0.5), 22);
+      ctx.strokeStyle = hexCode || '#6366f1';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(boxX, boxY - 24, Math.max(120, boxW * 0.5), 22);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '600 11px Inter, sans-serif';
+      ctx.fillText('HELD OBJECT ROI', boxX + 8, boxY - 8);
+    }
+
     animFrameIdRef.current = requestAnimationFrame(processFrame);
-  }, [isCameraActive, saveDetectionToBackend]);
+  }, [isCameraActive, isMirrored, hexCode, saveDetectionToBackend]);
 
   // Start Camera
   const handleStartCamera = async () => {
@@ -340,7 +391,6 @@ export const App: React.FC = () => {
       if (video) {
         video.srcObject = stream;
 
-        // Safely wait for video metadata before playing
         await new Promise<void>((resolve) => {
           if (video.readyState >= 1) {
             resolve();
@@ -361,15 +411,15 @@ export const App: React.FC = () => {
       setIsCameraActive(true);
       stabilityManagerRef.current.reset();
 
-      // Initialize MediaPipe Hands
+      // Initialize MediaPipe Hands asynchronously
       if (!handTrackerRef.current) {
-        const tracker = await createHandTracker((res) => {
+        createHandTracker((res) => {
           latestHandResultRef.current = res;
+        }).then((tracker) => {
+          handTrackerRef.current = tracker;
         });
-        handTrackerRef.current = tracker;
       }
 
-      // Start CV loop
       if (animFrameIdRef.current) {
         cancelAnimationFrame(animFrameIdRef.current);
       }
@@ -466,6 +516,8 @@ export const App: React.FC = () => {
           onStopCamera={handleStopCamera}
           error={errorMessage}
           detectedColorHex={hexCode}
+          isMirrored={isMirrored}
+          setIsMirrored={setIsMirrored}
         />
 
         <ResultPanel
