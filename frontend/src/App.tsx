@@ -320,6 +320,11 @@ export const App: React.FC = () => {
   const handleStartCamera = async () => {
     setErrorMessage(null);
     try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 640 },
@@ -330,23 +335,49 @@ export const App: React.FC = () => {
       });
 
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+      const video = videoRef.current;
+
+      if (video) {
+        video.srcObject = stream;
+
+        // Safely wait for video metadata before playing
+        await new Promise<void>((resolve) => {
+          if (video.readyState >= 1) {
+            resolve();
+          } else {
+            video.onloadedmetadata = () => resolve();
+          }
+        });
+
+        try {
+          await video.play();
+        } catch (playErr: any) {
+          if (playErr.name !== 'AbortError') {
+            console.warn('Video play warning:', playErr);
+          }
+        }
       }
 
       setIsCameraActive(true);
       stabilityManagerRef.current.reset();
 
       // Initialize MediaPipe Hands
-      const tracker = await createHandTracker((res) => {
-        latestHandResultRef.current = res;
-      });
-      handTrackerRef.current = tracker;
+      if (!handTrackerRef.current) {
+        const tracker = await createHandTracker((res) => {
+          latestHandResultRef.current = res;
+        });
+        handTrackerRef.current = tracker;
+      }
 
       // Start CV loop
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+      }
       animFrameIdRef.current = requestAnimationFrame(processFrame);
     } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return;
+      }
       console.error('Camera error:', err);
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setErrorMessage('Camera access is required. Please allow camera permission in your browser and try again.');
@@ -392,7 +423,12 @@ export const App: React.FC = () => {
   // Clean up on unmount
   useEffect(() => {
     return () => {
-      handleStopCamera();
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
     };
   }, []);
 
