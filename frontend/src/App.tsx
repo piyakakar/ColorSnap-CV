@@ -228,6 +228,10 @@ export const App: React.FC = () => {
         let validObjectPixelCount = 0;
         let skinPixelCount = 0;
 
+        const centerX = roiPixelW / 2;
+        const centerY = roiPixelH / 2;
+        const maxDist = Math.sqrt(centerX * centerX + centerY * centerY);
+
         // Sample pixels with step for fast CV performance
         const step = 2; // sample every 2nd pixel (4x speedup)
         for (let y = 0; y < roiPixelH; y += step) {
@@ -246,11 +250,15 @@ export const App: React.FC = () => {
               continue;
             }
 
-            const classified = classifyHsvPixel(pixelHsv);
+            const classified = classifyHsvPixel(pixelHsv, pixelRgb);
             if (classified) {
-              colorHistogram[classified]++;
+              // Center-weighted voting (pixels closer to center of ROI have 1.5x - 2x vote)
+              const dist = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+              const weight = 1 + (1 - dist / maxDist);
+
+              colorHistogram[classified] += weight;
               matchingColorPixels[classified].push(pixelRgb);
-              validObjectPixelCount++;
+              validObjectPixelCount += 1;
             }
           }
         }
@@ -258,19 +266,18 @@ export const App: React.FC = () => {
         // Evaluate dominant color
         let candidateColor: SupportedColorName | null = null;
         let maxCount = 0;
+        let totalWeighted = 0;
 
         for (const [colName, count] of Object.entries(colorHistogram) as [SupportedColorName, number][]) {
+          totalWeighted += count;
           if (count > maxCount) {
             maxCount = count;
             candidateColor = colName;
           }
         }
 
-        const totalEvaluated = validObjectPixelCount + skinPixelCount;
-        const objectRatio = totalEvaluated > 0 ? validObjectPixelCount / totalEvaluated : 0;
-        const dominanceRatio = validObjectPixelCount > 0 ? maxCount / validObjectPixelCount : 0;
-
-        const hasObject = validObjectPixelCount >= 25 && dominanceRatio >= 0.30;
+        const dominanceRatio = totalWeighted > 0 ? maxCount / totalWeighted : 0;
+        const hasObject = validObjectPixelCount >= 15 && dominanceRatio >= 0.25;
         setIsObjectDetected(hasObject);
 
         // Run through Temporal Stability Filter to eliminate flickering
